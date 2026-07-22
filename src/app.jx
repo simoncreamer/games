@@ -1,1 +1,893 @@
 
+import React, { useEffect, useMemo, useRef, useState } from "react";
+
+const WORLD_WIDTH = 920;
+const WORLD_HEIGHT = 500;
+const PLAYER_WIDTH = 34;
+const PLAYER_HEIGHT = 44;
+
+const levels = [
+  {
+    name: "Mushroom Meadow",
+    background:
+      "linear-gradient(to bottom, #7dd3fc 0%, #cffafe 58%, #dcfce7 100%)",
+    platforms: [
+      { x: 0, y: 448, w: 920, h: 52 },
+      { x: 120, y: 362, w: 150, h: 20 },
+      { x: 355, y: 300, w: 160, h: 20 },
+      { x: 610, y: 355, w: 150, h: 20 },
+      { x: 790, y: 270, w: 100, h: 20 },
+    ],
+    coins: [
+      { x: 170, y: 320 },
+      { x: 230, y: 320 },
+      { x: 400, y: 255 },
+      { x: 470, y: 255 },
+      { x: 665, y: 310 },
+      { x: 835, y: 225 },
+    ],
+    door: { x: 850, y: 396 },
+  },
+  {
+    name: "Cloud Climb",
+    background:
+      "linear-gradient(to bottom, #a5b4fc 0%, #bae6fd 55%, #fce7f3 100%)",
+    platforms: [
+      { x: 0, y: 448, w: 920, h: 52 },
+      { x: 80, y: 370, w: 135, h: 20 },
+      { x: 275, y: 315, w: 125, h: 20 },
+      { x: 465, y: 250, w: 125, h: 20 },
+      { x: 650, y: 320, w: 120, h: 20 },
+      { x: 790, y: 225, w: 105, h: 20 },
+    ],
+    coins: [
+      { x: 130, y: 325 },
+      { x: 320, y: 270 },
+      { x: 510, y: 205 },
+      { x: 690, y: 275 },
+      { x: 835, y: 180 },
+      { x: 875, y: 180 },
+    ],
+    door: { x: 850, y: 396 },
+  },
+];
+
+function createPlayers() {
+  return [
+    {
+      id: 1,
+      name: "Red",
+      x: 35,
+      y: 390,
+      vx: 0,
+      vy: 0,
+      color: "#ef4444",
+      hat: "M",
+      score: 0,
+      onGround: false,
+    },
+    {
+      id: 2,
+      name: "Green",
+      x: 82,
+      y: 390,
+      vx: 0,
+      vy: 0,
+      color: "#22c55e",
+      hat: "L",
+      score: 0,
+      onGround: false,
+    },
+  ];
+}
+
+function overlaps(a, b) {
+  return (
+    a.x < b.x + b.w &&
+    a.x + a.w > b.x &&
+    a.y < b.y + b.h &&
+    a.y + a.h > b.y
+  );
+}
+
+export default function App() {
+  const [screen, setScreen] = useState("menu");
+  const [levelIndex, setLevelIndex] = useState(0);
+  const [players, setPlayers] = useState(createPlayers);
+  const [collected, setCollected] = useState(new Set());
+  const [muted, setMuted] = useState(false);
+  const [scale, setScale] = useState(1);
+
+  const keys = useRef({});
+  const gameFrameRef = useRef(null);
+  const animationRef = useRef(null);
+  const winningRef = useRef(false);
+
+  const level = levels[levelIndex];
+
+  const totalScore = useMemo(
+    () => players.reduce((total, player) => total + player.score, 0),
+    [players]
+  );
+
+  function playSound(frequency = 700, duration = 0.08) {
+    if (muted) return;
+
+    try {
+      const AudioContext =
+        window.AudioContext || window.webkitAudioContext;
+
+      const context = new AudioContext();
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+
+      oscillator.type = "square";
+      oscillator.frequency.value = frequency;
+
+      gain.gain.setValueAtTime(0.04, context.currentTime);
+      gain.gain.exponentialRampToValueAtTime(
+        0.001,
+        context.currentTime + duration
+      );
+
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+
+      oscillator.start();
+      oscillator.stop(context.currentTime + duration);
+    } catch {
+      // The game continues if audio is blocked.
+    }
+  }
+
+  function startLevel(nextLevel = levelIndex) {
+    winningRef.current = false;
+    setLevelIndex(nextLevel);
+    setPlayers(createPlayers());
+    setCollected(new Set());
+    setScreen("playing");
+  }
+
+  useEffect(() => {
+    function resizeGame() {
+      if (!gameFrameRef.current) return;
+
+      const availableWidth = gameFrameRef.current.clientWidth;
+      const availableHeight = Math.max(window.innerHeight - 205, 300);
+
+      const widthScale = availableWidth / WORLD_WIDTH;
+      const heightScale = availableHeight / WORLD_HEIGHT;
+
+      setScale(Math.min(widthScale, heightScale, 1));
+    }
+
+    resizeGame();
+    window.addEventListener("resize", resizeGame);
+
+    return () => {
+      window.removeEventListener("resize", resizeGame);
+    };
+  }, [screen]);
+
+  useEffect(() => {
+    function keyDown(event) {
+      const key = event.key.toLowerCase();
+      keys.current[key] = true;
+
+      if (
+        ["arrowleft", "arrowright", "arrowup", "arrowdown", " "].includes(
+          key
+        )
+      ) {
+        event.preventDefault();
+      }
+
+      if (key === "r" && screen === "playing") {
+        startLevel(levelIndex);
+      }
+
+      if (event.key === "Escape") {
+        setScreen("menu");
+      }
+    }
+
+    function keyUp(event) {
+      keys.current[event.key.toLowerCase()] = false;
+    }
+
+    window.addEventListener("keydown", keyDown);
+    window.addEventListener("keyup", keyUp);
+
+    return () => {
+      window.removeEventListener("keydown", keyDown);
+      window.removeEventListener("keyup", keyUp);
+    };
+  }, [screen, levelIndex]);
+
+  useEffect(() => {
+    if (screen !== "playing") return;
+
+    let previousTime = performance.now();
+
+    function gameLoop(currentTime) {
+      const delta = Math.min((currentTime - previousTime) / 16.67, 1.8);
+      previousTime = currentTime;
+
+      setPlayers((previousPlayers) => {
+        let bothAtDoor = true;
+        const collectedThisFrame = [];
+
+        const updatedPlayers = previousPlayers.map((player, index) => {
+          const leftPressed =
+            index === 0
+              ? keys.current["a"]
+              : keys.current["arrowleft"];
+
+          const rightPressed =
+            index === 0
+              ? keys.current["d"]
+              : keys.current["arrowright"];
+
+          const jumpPressed =
+            index === 0
+              ? keys.current["w"]
+              : keys.current["arrowup"];
+
+          let vx = leftPressed
+            ? -4.2
+            : rightPressed
+            ? 4.2
+            : player.vx * 0.72;
+
+          let vy = player.vy + 0.72 * delta;
+
+          let x = player.x + vx * delta;
+          let y = player.y + vy * delta;
+
+          x = Math.max(
+            0,
+            Math.min(WORLD_WIDTH - PLAYER_WIDTH, x)
+          );
+
+          let onGround = false;
+          const previousBottom = player.y + PLAYER_HEIGHT;
+
+          for (const platform of level.platforms) {
+            const playerBody = {
+              x,
+              y,
+              w: PLAYER_WIDTH,
+              h: PLAYER_HEIGHT,
+            };
+
+            if (
+              overlaps(playerBody, platform) &&
+              vy >= 0 &&
+              previousBottom <= platform.y + 10
+            ) {
+              y = platform.y - PLAYER_HEIGHT;
+              vy = 0;
+              onGround = true;
+            }
+          }
+
+          if (jumpPressed && (player.onGround || onGround)) {
+            vy = -12.4;
+            onGround = false;
+            playSound(410, 0.08);
+          }
+
+          if (y > WORLD_HEIGHT + 80) {
+            x = index === 0 ? 35 : 82;
+            y = 380;
+            vx = 0;
+            vy = 0;
+          }
+
+          let score = player.score;
+
+          level.coins.forEach((coin, coinIndex) => {
+            const coinKey = `${levelIndex}-${coinIndex}`;
+
+            const touchingCoin = overlaps(
+              {
+                x,
+                y,
+                w: PLAYER_WIDTH,
+                h: PLAYER_HEIGHT,
+              },
+              {
+                x: coin.x,
+                y: coin.y,
+                w: 28,
+                h: 28,
+              }
+            );
+
+            if (!collected.has(coinKey) && touchingCoin) {
+              collectedThisFrame.push(coinKey);
+              score += 10;
+              playSound(880, 0.08);
+            }
+          });
+
+          const atDoor = overlaps(
+            {
+              x,
+              y,
+              w: PLAYER_WIDTH,
+              h: PLAYER_HEIGHT,
+            },
+            {
+              x: level.door.x,
+              y: level.door.y,
+              w: 46,
+              h: 52,
+            }
+          );
+
+          if (!atDoor) {
+            bothAtDoor = false;
+          }
+
+          return {
+            ...player,
+            x,
+            y,
+            vx,
+            vy,
+            score,
+            onGround,
+          };
+        });
+
+        if (collectedThisFrame.length > 0) {
+          setCollected((previousCollected) => {
+            const nextCollected = new Set(previousCollected);
+
+            collectedThisFrame.forEach((coinKey) => {
+              nextCollected.add(coinKey);
+            });
+
+            return nextCollected;
+          });
+        }
+
+        if (bothAtDoor && !winningRef.current) {
+          winningRef.current = true;
+          playSound(1040, 0.25);
+
+          window.setTimeout(() => {
+            if (levelIndex === levels.length - 1) {
+              setScreen("victory");
+            } else {
+              setScreen("levelComplete");
+            }
+          }, 300);
+        }
+
+        return updatedPlayers;
+      });
+
+      animationRef.current = requestAnimationFrame(gameLoop);
+    }
+
+    animationRef.current = requestAnimationFrame(gameLoop);
+
+    return () => {
+      cancelAnimationFrame(animationRef.current);
+    };
+  }, [screen, levelIndex, level, collected, muted]);
+
+  const styles = {
+    page: {
+      minHeight: "100vh",
+      boxSizing: "border-box",
+      padding: 16,
+      background: "#020617",
+      color: "white",
+      fontFamily:
+        "Inter, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+    },
+    container: {
+      width: "100%",
+      maxWidth: 1000,
+      margin: "0 auto",
+    },
+    header: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: 12,
+      marginBottom: 12,
+    },
+    title: {
+      margin: 0,
+      fontSize: "clamp(28px, 5vw, 42px)",
+      fontWeight: 900,
+    },
+    subtitle: {
+      margin: "4px 0 0",
+      color: "#cbd5e1",
+    },
+    button: {
+      border: 0,
+      borderRadius: 16,
+      padding: "12px 18px",
+      background: "#334155",
+      color: "white",
+      fontWeight: 800,
+      cursor: "pointer",
+      boxShadow: "0 8px 20px rgba(0,0,0,0.25)",
+    },
+    primaryButton: {
+      border: 0,
+      borderRadius: 18,
+      padding: "15px 28px",
+      background: "#34d399",
+      color: "#052e16",
+      fontSize: 19,
+      fontWeight: 900,
+      cursor: "pointer",
+      boxShadow: "0 10px 25px rgba(0,0,0,0.3)",
+    },
+    menu: {
+      padding: "clamp(24px, 6vw, 55px)",
+      textAlign: "center",
+      borderRadius: 28,
+      background:
+        "linear-gradient(135deg, #ef4444, #fbbf24, #22c55e)",
+      boxShadow: "0 24px 70px rgba(0,0,0,0.45)",
+    },
+    menuInner: {
+      padding: "clamp(25px, 6vw, 50px)",
+      borderRadius: 22,
+      background: "rgba(15,23,42,0.96)",
+    },
+    controlGrid: {
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+      gap: 15,
+      marginTop: 28,
+      textAlign: "left",
+    },
+    controlCard: {
+      padding: 18,
+      borderRadius: 18,
+      background: "rgba(255,255,255,0.08)",
+      border: "1px solid rgba(255,255,255,0.12)",
+    },
+    scoreGrid: {
+      display: "grid",
+      gridTemplateColumns: "repeat(3, 1fr)",
+      gap: 8,
+      marginBottom: 10,
+    },
+    scoreCard: {
+      padding: "10px 5px",
+      borderRadius: 14,
+      textAlign: "center",
+      background: "#1e293b",
+      fontWeight: 900,
+      fontSize: "clamp(12px, 2.5vw, 17px)",
+    },
+    gameFrame: {
+      position: "relative",
+      width: "100%",
+      height: WORLD_HEIGHT * scale,
+      borderRadius: 24,
+      overflow: "hidden",
+      background: "#0f172a",
+      boxShadow: "0 22px 60px rgba(0,0,0,0.5)",
+      border: "4px solid rgba(255,255,255,0.12)",
+      boxSizing: "border-box",
+    },
+    gameWorld: {
+      position: "absolute",
+      left: 0,
+      top: 0,
+      width: WORLD_WIDTH,
+      height: WORLD_HEIGHT,
+      transform: `scale(${scale})`,
+      transformOrigin: "top left",
+      background: level.background,
+      overflow: "hidden",
+    },
+    footer: {
+      display: "flex",
+      justifyContent: "space-between",
+      flexWrap: "wrap",
+      gap: 8,
+      marginTop: 10,
+      color: "#cbd5e1",
+      fontSize: 14,
+    },
+    fullScreen: {
+      padding: 42,
+      textAlign: "center",
+      borderRadius: 28,
+      background: "#0f172a",
+      boxShadow: "0 24px 70px rgba(0,0,0,0.45)",
+    },
+  };
+
+  return (
+    <main style={styles.page}>
+      <div style={styles.container}>
+        <header style={styles.header}>
+          <div>
+            <h1 style={styles.title}>Pipe Bros</h1>
+            <p style={styles.subtitle}>
+              A two-player platform adventure
+            </p>
+          </div>
+
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              style={styles.button}
+              onClick={() => setMuted((previous) => !previous)}
+            >
+              {muted ? "🔇 Sound off" : "🔊 Sound on"}
+            </button>
+
+            {screen !== "menu" && (
+              <button
+                style={styles.button}
+                onClick={() => setScreen("menu")}
+              >
+                Home
+              </button>
+            )}
+          </div>
+        </header>
+
+        {screen === "menu" && (
+          <section style={styles.menu}>
+            <div style={styles.menuInner}>
+              <div style={{ fontSize: 70 }}>🍄 🧱 🪙</div>
+
+              <h2
+                style={{
+                  margin: "12px 0",
+                  fontSize: "clamp(38px, 8vw, 65px)",
+                }}
+              >
+                Ready, Bros?
+              </h2>
+
+              <p
+                style={{
+                  maxWidth: 650,
+                  margin: "0 auto 26px",
+                  color: "#cbd5e1",
+                  fontSize: 18,
+                  lineHeight: 1.6,
+                }}
+              >
+                Work together, collect coins and get both players to
+                the door.
+              </p>
+
+              <button
+                style={styles.primaryButton}
+                onClick={() => startLevel(0)}
+              >
+                Play Game
+              </button>
+
+              <div style={styles.controlGrid}>
+                <div style={styles.controlCard}>
+                  <strong
+                    style={{
+                      display: "block",
+                      marginBottom: 8,
+                      color: "#fca5a5",
+                      fontSize: 20,
+                    }}
+                  >
+                    Player 1: Red
+                  </strong>
+
+                  A and D to move
+                  <br />
+                  W to jump
+                </div>
+
+                <div style={styles.controlCard}>
+                  <strong
+                    style={{
+                      display: "block",
+                      marginBottom: 8,
+                      color: "#86efac",
+                      fontSize: 20,
+                    }}
+                  >
+                    Player 2: Green
+                  </strong>
+
+                  Left and right arrows to move
+                  <br />
+                  Up arrow to jump
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {screen === "playing" && (
+          <>
+            <section style={styles.scoreGrid}>
+              <div
+                style={{
+                  ...styles.scoreCard,
+                  background: "rgba(239,68,68,0.25)",
+                }}
+              >
+                Red: {players[0].score}
+              </div>
+
+              <div
+                style={{
+                  ...styles.scoreCard,
+                  background: "rgba(245,158,11,0.25)",
+                }}
+              >
+                {level.name} · {totalScore} points
+              </div>
+
+              <div
+                style={{
+                  ...styles.scoreCard,
+                  background: "rgba(34,197,94,0.25)",
+                }}
+              >
+                Green: {players[1].score}
+              </div>
+            </section>
+
+            <div ref={gameFrameRef} style={styles.gameFrame}>
+              <div style={styles.gameWorld}>
+                <div
+                  style={{
+                    position: "absolute",
+                    left: 80,
+                    top: 55,
+                    width: 150,
+                    height: 55,
+                    borderRadius: 50,
+                    background: "rgba(255,255,255,0.72)",
+                  }}
+                />
+
+                <div
+                  style={{
+                    position: "absolute",
+                    left: 500,
+                    top: 65,
+                    width: 190,
+                    height: 60,
+                    borderRadius: 50,
+                    background: "rgba(255,255,255,0.68)",
+                  }}
+                />
+
+                {level.platforms.map((platform, index) => (
+                  <div
+                    key={`platform-${index}`}
+                    style={{
+                      position: "absolute",
+                      left: platform.x,
+                      top: platform.y,
+                      width: platform.w,
+                      height: platform.h,
+                      boxSizing: "border-box",
+                      border: "4px solid rgba(20,83,45,0.42)",
+                      borderRadius: index === 0 ? 0 : "12px 12px 0 0",
+                      background:
+                        index === 0
+                          ? "linear-gradient(#22c55e 0 12px, #92400e 12px)"
+                          : "#16a34a",
+                      boxShadow: "0 5px 10px rgba(0,0,0,0.2)",
+                    }}
+                  />
+                ))}
+
+                {level.coins.map((coin, coinIndex) => {
+                  const coinKey = `${levelIndex}-${coinIndex}`;
+
+                  if (collected.has(coinKey)) return null;
+
+                  return (
+                    <div
+                      key={coinKey}
+                      style={{
+                        position: "absolute",
+                        left: coin.x,
+                        top: coin.y,
+                        width: 28,
+                        height: 28,
+                        display: "grid",
+                        placeItems: "center",
+                        boxSizing: "border-box",
+                        borderRadius: "50%",
+                        border: "4px solid #ca8a04",
+                        background: "#fde047",
+                        color: "#854d0e",
+                        fontSize: 14,
+                        fontWeight: 900,
+                        boxShadow: "0 4px 8px rgba(0,0,0,0.25)",
+                      }}
+                    >
+                      ★
+                    </div>
+                  );
+                })}
+
+                <div
+                  style={{
+                    position: "absolute",
+                    left: level.door.x,
+                    top: level.door.y,
+                    width: 46,
+                    height: 52,
+                    boxSizing: "border-box",
+                    border: "4px solid #78350f",
+                    borderRadius: "20px 20px 0 0",
+                    background: "#f59e0b",
+                    boxShadow: "0 7px 14px rgba(0,0,0,0.3)",
+                  }}
+                >
+                  <div
+                    style={{
+                      position: "absolute",
+                      right: 7,
+                      top: 24,
+                      width: 7,
+                      height: 7,
+                      borderRadius: "50%",
+                      background: "#fef3c7",
+                    }}
+                  />
+                </div>
+
+                {players.map((player) => (
+                  <div
+                    key={player.id}
+                    style={{
+                      position: "absolute",
+                      left: player.x,
+                      top: player.y,
+                      width: PLAYER_WIDTH,
+                      height: PLAYER_HEIGHT,
+                      filter: "drop-shadow(0 5px 3px rgba(0,0,0,0.3))",
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 32,
+                        height: 17,
+                        display: "grid",
+                        placeItems: "center",
+                        borderRadius: "16px 16px 3px 3px",
+                        background: player.color,
+                        color: "white",
+                        fontSize: 11,
+                        fontWeight: 900,
+                      }}
+                    >
+                      {player.hat}
+                    </div>
+
+                    <div
+                      style={{
+                        width: 25,
+                        height: 13,
+                        margin: "0 auto",
+                        boxSizing: "border-box",
+                        border: "2px solid #78350f",
+                        borderRadius: 4,
+                        background: "#fed7aa",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: 4,
+                          height: 4,
+                          marginLeft: 14,
+                          marginTop: 2,
+                          borderRadius: "50%",
+                          background: "#0f172a",
+                        }}
+                      />
+                    </div>
+
+                    <div
+                      style={{
+                        width: 31,
+                        height: 16,
+                        margin: "0 auto",
+                        boxSizing: "border-box",
+                        border: "2px solid rgba(15,23,42,0.45)",
+                        borderRadius: "2px 2px 7px 7px",
+                        background: player.color,
+                      }}
+                    />
+                  </div>
+                ))}
+
+                <div
+                  style={{
+                    position: "absolute",
+                    left: 720,
+                    bottom: 62,
+                    padding: "7px 12px",
+                    borderRadius: 10,
+                    background: "rgba(15,23,42,0.78)",
+                    color: "white",
+                    fontWeight: 800,
+                  }}
+                >
+                  Both players enter
+                </div>
+              </div>
+            </div>
+
+            <footer style={styles.footer}>
+              <span>R: restart level</span>
+              <span>Both players must reach the door</span>
+              <span>Esc: home</span>
+            </footer>
+          </>
+        )}
+
+        {screen === "levelComplete" && (
+          <section style={styles.fullScreen}>
+            <div style={{ fontSize: 75 }}>🎉</div>
+
+            <h2 style={{ fontSize: 48, margin: "10px 0" }}>
+              Level Complete!
+            </h2>
+
+            <p style={{ color: "#cbd5e1", fontSize: 20 }}>
+              Team score: {totalScore}
+            </p>
+
+            <button
+              style={styles.primaryButton}
+              onClick={() => startLevel(levelIndex + 1)}
+            >
+              Next Level
+            </button>
+          </section>
+        )}
+
+        {screen === "victory" && (
+          <section style={styles.fullScreen}>
+            <div style={{ fontSize: 80 }}>🏆</div>
+
+            <h2
+              style={{
+                fontSize: "clamp(38px, 7vw, 60px)",
+                margin: "10px 0",
+              }}
+            >
+              You Saved the Day!
+            </h2>
+
+            <p style={{ color: "#cbd5e1", fontSize: 20 }}>
+              Final team score: {totalScore}
+            </p>
+
+            <button
+              style={styles.primaryButton}
+              onClick={() => startLevel(0)}
+            >
+              Play Again
+            </button>
+          </section>
+        )}
+      </div>
+    </main>
+  );
+}
